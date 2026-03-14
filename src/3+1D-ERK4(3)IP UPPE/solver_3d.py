@@ -80,6 +80,15 @@ class ERK43IP_UPPE_3D_Optimized:
         self.current_gamma = None
         self.current_shock = None
 
+        # --- 7. 频域抗混叠滤波器 (Anti-aliasing Filter) ---
+        # 【关键修复】：必须使用未 shift 的 self.omega，与 fft 输出的原生频率顺序保持对齐
+        freq_unshifted = self.omega / (2 * np.pi) 
+        f_max = float(cp.max(cp.abs(freq_unshifted))) + 1e-10
+        # 构造一个 16 阶超高斯吸收器，只在频谱最外侧 15% 区域生效
+        filter_w = cp.exp(- (freq_unshifted / (0.85 * f_max))**16 ).astype(self.float_dtype)
+        # 广播为 3D 形状 (1, 1, Nt)
+        self.anti_alias_filter = filter_w[cp.newaxis, cp.newaxis, :].astype(self.complex_dtype)
+
     # =========================================================================
     # 内部辅助函数
     # =========================================================================
@@ -245,6 +254,7 @@ class ERK43IP_UPPE_3D_Optimized:
         err = cp.sqrt(cp.sum(diff_sq)) / (cp.sqrt(cp.sum(norm_sq)) + 1e-20)
         
         A4_w = ifft2(A4_kw, axes=(0,1))
+        A4_w = A4_w * self.anti_alias_filter
         A4_t = ifft(A4_w, axis=-1)
         A4_t *= cp.exp(-self.damp_space * h)
         

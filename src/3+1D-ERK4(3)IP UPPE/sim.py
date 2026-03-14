@@ -43,10 +43,10 @@ class MPC_Final_Runner:
         self.T_per_round = self.total_trans ** (1 / self.cycles)
 
         # --- 3. 网格与求解器 ---
-        self.window_width = 6.0e-3  
+        self.window_width = 2.0e-3  
         self.Nxy = 256
-        self.Nt = 2048
-        self.time_window = 60e-12
+        self.Nt = 2046
+        self.time_window = 80e-12
 
         x = np.linspace(-self.window_width / 2, self.window_width / 2, self.Nxy)
         y = np.linspace(-self.window_width / 2, self.window_width / 2, self.Nxy)
@@ -68,8 +68,8 @@ class MPC_Final_Runner:
 
         self.viz_wl_min_nm = 1050.0
         self.viz_wl_max_nm = 1080.0
-        self.viz_time_ps_min = -20.0
-        self.viz_time_ps_max = 20.0
+        self.viz_time_ps_min = -30.0
+        self.viz_time_ps_max = 30.0
         
         # 归一化缩放因子 (初始化为 1.0)
         self.A_scale = 1.0
