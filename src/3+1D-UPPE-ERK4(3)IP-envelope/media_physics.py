@@ -84,6 +84,7 @@ class OpticalMedium:
         # 介质特性 (由子类覆盖)
         self.n0 = 1.0
         self.n2 = 0.0
+        self.n4 = 0.0   # 高阶克尔 HOKE (m⁴/W²), 0 = 禁用
         self.Ui = 0.0
         self.rho_nt = 0.0
         self.tau_c = 0.0
@@ -187,9 +188,12 @@ class OpticalMedium:
              cp.int32(Nt), cp.int32(num_spatial_pts))
         )
 
-        # 4. Kerr 项 (保持 solver 精度)
+        # 4. Kerr + HOKE 项 (保持 solver 精度)
         gamma_kerr = 1j * (self.omega0 / self.c) * self.n2
         Kerr_term = (gamma_kerr * I_eff * A_t).astype(self.complex_dtype)
+        if self.n4 != 0.0:
+            gamma_hoke = 1j * (self.omega0 / self.c) * self.n4
+            Kerr_term = Kerr_term + (gamma_hoke * (I_eff ** 2) * A_t).astype(self.complex_dtype)
 
         # 5. 等离子体项 (内部 float64 保护，输出转回 solver 精度)
         # gen_rate_out 和 rho_t 均为 float64，避免中间乘积溢出
@@ -301,4 +305,206 @@ class Air(OpticalMedium):
 
     def get_avalanche_rate(self, Intensity):
         """空气在飞秒尺度内忽略雪崩电离"""
+        return cp.zeros_like(Intensity, dtype=self.float_dtype)
+
+
+# =============================================================================
+# 稀有气体介质 (包络版)
+# =============================================================================
+class Helium(OpticalMedium):
+    """氦气 He — 最高电离势，非线性最弱"""
+
+    def __init__(self, center_wavelength, pressure_atm=1.0, precision='single',
+                 use_shock=False):
+        super().__init__(center_wavelength, precision, use_shock)
+        self.pressure = pressure_atm
+
+        # 折射率 Cauchy 色散系数 (1 atm 基准)
+        self.cauchy_A = 3.48e-5
+        self.cauchy_B = 5.4e-8   # μm²
+        self.cauchy_C = 1.2e-10  # μm⁴
+
+        # 非线性折射率 @ 1 atm (P 线性定标)
+        self.n2 = 4.0e-25 * pressure_atm
+        # 高阶克尔 HOKE @ 1 atm (P² 定标, 负值 = 自散焦)
+        self.n4 = -1.0e-38 * (pressure_atm ** 2)
+
+        # 电离参数
+        self.Ui = 24.59 * self.e_charge
+        self.rho_nt = 2.45e25 * pressure_atm
+        self.K = 17
+        self.tau_rec = 1.0e-9
+        self.tau_c = 500e-15 / pressure_atm
+
+        self.sigma_drude = (self.e_charge ** 2 * self.tau_c) / \
+                           (self.c * self.eps0 * 1.0 * self.m_e
+                            * (1.0 + self.omega0 ** 2 * self.tau_c ** 2))
+        self.sigma_K = 0.0  # 高 K 气体，Keldysh 隧穿项主导
+        self._init_ionization_lut()
+
+    def refractive_index(self, omega_array):
+        omega_64 = omega_array.astype(cp.float64)
+        omega_safe = cp.where(cp.abs(omega_64) < 1e-12, 1e-12, omega_64)
+        wl_um = (2 * np.pi * self.c / cp.abs(omega_safe)) * 1e6
+        wl_sq = wl_um ** 2
+        K = self.cauchy_A + self.cauchy_B / wl_sq + self.cauchy_C / wl_sq ** 2
+        return 1.0 + K * (self.pressure / 1.0)
+
+    def get_avalanche_rate(self, Intensity):
+        return cp.zeros_like(Intensity, dtype=self.float_dtype)
+
+
+class Neon(OpticalMedium):
+    """氖气 Ne"""
+
+    def __init__(self, center_wavelength, pressure_atm=1.0, precision='single',
+                 use_shock=False):
+        super().__init__(center_wavelength, precision, use_shock)
+        self.pressure = pressure_atm
+
+        self.cauchy_A = 6.66e-5
+        self.cauchy_B = 2.4e-8
+        self.cauchy_C = 1.7e-10
+
+        self.n2 = 2.0e-24 * pressure_atm
+        self.n4 = -5.0e-38 * (pressure_atm ** 2)
+
+        self.Ui = 21.56 * self.e_charge
+        self.rho_nt = 2.45e25 * pressure_atm
+        self.K = 15
+        self.tau_rec = 1.0e-9
+        self.tau_c = 350e-15 / pressure_atm
+
+        self.sigma_drude = (self.e_charge ** 2 * self.tau_c) / \
+                           (self.c * self.eps0 * 1.0 * self.m_e
+                            * (1.0 + self.omega0 ** 2 * self.tau_c ** 2))
+        self.sigma_K = 0.0
+        self._init_ionization_lut()
+
+    def refractive_index(self, omega_array):
+        omega_64 = omega_array.astype(cp.float64)
+        omega_safe = cp.where(cp.abs(omega_64) < 1e-12, 1e-12, omega_64)
+        wl_um = (2 * np.pi * self.c / cp.abs(omega_safe)) * 1e6
+        wl_sq = wl_um ** 2
+        K = self.cauchy_A + self.cauchy_B / wl_sq + self.cauchy_C / wl_sq ** 2
+        return 1.0 + K * (self.pressure / 1.0)
+
+    def get_avalanche_rate(self, Intensity):
+        return cp.zeros_like(Intensity, dtype=self.float_dtype)
+
+
+class Argon(OpticalMedium):
+    """氩气 Ar"""
+
+    def __init__(self, center_wavelength, pressure_atm=1.0, precision='single',
+                 use_shock=False):
+        super().__init__(center_wavelength, precision, use_shock)
+        self.pressure = pressure_atm
+
+        self.cauchy_A = 27.9e-5
+        self.cauchy_B = 12.8e-8
+        self.cauchy_C = 5.2e-10
+
+        self.n2 = 1.0e-23 * pressure_atm
+        self.n4 = -1.0e-36 * (pressure_atm ** 2)
+
+        self.Ui = 15.76 * self.e_charge
+        self.rho_nt = 2.45e25 * pressure_atm
+        self.K = 11
+        self.tau_rec = 1.0e-9
+        self.tau_c = 190e-15 / pressure_atm
+
+        self.sigma_drude = (self.e_charge ** 2 * self.tau_c) / \
+                           (self.c * self.eps0 * 1.0 * self.m_e
+                            * (1.0 + self.omega0 ** 2 * self.tau_c ** 2))
+        self.sigma_K = 1.0e-188 * pressure_atm
+        self._init_ionization_lut()
+
+    def refractive_index(self, omega_array):
+        omega_64 = omega_array.astype(cp.float64)
+        omega_safe = cp.where(cp.abs(omega_64) < 1e-12, 1e-12, omega_64)
+        wl_um = (2 * np.pi * self.c / cp.abs(omega_safe)) * 1e6
+        wl_sq = wl_um ** 2
+        K = self.cauchy_A + self.cauchy_B / wl_sq + self.cauchy_C / wl_sq ** 2
+        return 1.0 + K * (self.pressure / 1.0)
+
+    def get_avalanche_rate(self, Intensity):
+        return cp.zeros_like(Intensity, dtype=self.float_dtype)
+
+
+class Krypton(OpticalMedium):
+    """氪气 Kr"""
+
+    def __init__(self, center_wavelength, pressure_atm=1.0, precision='single',
+                 use_shock=False):
+        super().__init__(center_wavelength, precision, use_shock)
+        self.pressure = pressure_atm
+
+        self.cauchy_A = 41.9e-5
+        self.cauchy_B = 21.3e-8
+        self.cauchy_C = 8.4e-10
+
+        self.n2 = 2.8e-23 * pressure_atm
+        self.n4 = -2.5e-36 * (pressure_atm ** 2)
+
+        self.Ui = 14.00 * self.e_charge
+        self.rho_nt = 2.45e25 * pressure_atm
+        self.K = 10
+        self.tau_rec = 1.0e-9
+        self.tau_c = 150e-15 / pressure_atm
+
+        self.sigma_drude = (self.e_charge ** 2 * self.tau_c) / \
+                           (self.c * self.eps0 * 1.0 * self.m_e
+                            * (1.0 + self.omega0 ** 2 * self.tau_c ** 2))
+        self.sigma_K = 1.0e-168 * pressure_atm
+        self._init_ionization_lut()
+
+    def refractive_index(self, omega_array):
+        omega_64 = omega_array.astype(cp.float64)
+        omega_safe = cp.where(cp.abs(omega_64) < 1e-12, 1e-12, omega_64)
+        wl_um = (2 * np.pi * self.c / cp.abs(omega_safe)) * 1e6
+        wl_sq = wl_um ** 2
+        K = self.cauchy_A + self.cauchy_B / wl_sq + self.cauchy_C / wl_sq ** 2
+        return 1.0 + K * (self.pressure / 1.0)
+
+    def get_avalanche_rate(self, Intensity):
+        return cp.zeros_like(Intensity, dtype=self.float_dtype)
+
+
+class Xenon(OpticalMedium):
+    """氙气 Xe — 最低电离势，非线性最强"""
+
+    def __init__(self, center_wavelength, pressure_atm=1.0, precision='single',
+                 use_shock=False):
+        super().__init__(center_wavelength, precision, use_shock)
+        self.pressure = pressure_atm
+
+        self.cauchy_A = 68.7e-5
+        self.cauchy_B = 40.6e-8
+        self.cauchy_C = 16.3e-10
+
+        self.n2 = 6.5e-23 * pressure_atm
+        self.n4 = -8.0e-36 * (pressure_atm ** 2)
+
+        self.Ui = 12.13 * self.e_charge
+        self.rho_nt = 2.45e25 * pressure_atm
+        self.K = 8
+        self.tau_rec = 1.0e-9
+        self.tau_c = 120e-15 / pressure_atm
+
+        self.sigma_drude = (self.e_charge ** 2 * self.tau_c) / \
+                           (self.c * self.eps0 * 1.0 * self.m_e
+                            * (1.0 + self.omega0 ** 2 * self.tau_c ** 2))
+        self.sigma_K = 1.0e-130 * pressure_atm
+        self._init_ionization_lut()
+
+    def refractive_index(self, omega_array):
+        omega_64 = omega_array.astype(cp.float64)
+        omega_safe = cp.where(cp.abs(omega_64) < 1e-12, 1e-12, omega_64)
+        wl_um = (2 * np.pi * self.c / cp.abs(omega_safe)) * 1e6
+        wl_sq = wl_um ** 2
+        K = self.cauchy_A + self.cauchy_B / wl_sq + self.cauchy_C / wl_sq ** 2
+        return 1.0 + K * (self.pressure / 1.0)
+
+    def get_avalanche_rate(self, Intensity):
         return cp.zeros_like(Intensity, dtype=self.float_dtype)
