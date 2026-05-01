@@ -298,15 +298,18 @@ class OpticalMedium:
         )
 
         # 5. 非线性极化 (Kerr + HOKE + 拉曼)
+        # 分步乘法避免 E³/E⁴ 中间值溢出 float32
+        chi3_coef = self.eps0 * self.chi3
         if hasattr(self, 'f_R') and self.use_raman:
             E_eff_sq = (1 - self.f_R) * (E_t ** 2) + self.f_R * self.get_raman_intensity(E_t)
-            P_NL = self.eps0 * self.chi3 * E_t * E_eff_sq
+            P_NL = chi3_coef * E_t * E_eff_sq
         else:
-            P_NL = self.eps0 * self.chi3 * (E_t ** 3)
-        # 高阶克尔 HOKE
+            P_NL = ((chi3_coef * E_t) * E_t) * E_t
+        # 高阶克尔 HOKE (分步避免 E⁴ 溢出)
         if self.chi5 != 0.0:
-            E_sq = E_t ** 2
-            P_NL = P_NL + self.eps0 * self.chi5 * E_t * (E_sq ** 2)
+            chi5_coef = self.eps0 * self.chi5
+            E_sq = E_t * E_t
+            P_NL = P_NL + ((chi5_coef * E_t) * E_sq) * E_sq
 
         # 6. 转回 solver 精度类型
         J_out = J_out.astype(self.float_dtype)

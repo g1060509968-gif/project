@@ -177,10 +177,10 @@ class ERK43_RealField_UPPE_3D:
             E0 = cp.asarray(E0, dtype=self.float_dtype)
         
         self.E_scale = float(cp.max(cp.abs(E0)))
-        if self.E_scale < 1e-30: 
+        if self.E_scale < 1e-30:
             self.E_scale = 1.0
-            
-        E = E0.astype(self.float_dtype) / self.E_scale
+
+        E = (E0 / self.float_dtype(self.E_scale)).astype(self.float_dtype)
 
         z = 0.0
         h = min(max_step, L/1000.0) 

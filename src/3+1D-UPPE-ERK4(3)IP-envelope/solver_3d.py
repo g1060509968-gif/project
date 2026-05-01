@@ -164,10 +164,10 @@ class ERK43IP_UPPE_3D_Optimized:
             A0 = cp.asarray(A0, dtype=self.complex_dtype)
         
         self.A_scale = float(cp.max(cp.abs(A0)))
-        if self.A_scale < 1e-30: 
+        if self.A_scale < 1e-30:
             self.A_scale = 1.0
-            
-        A = A0.astype(self.complex_dtype) / self.A_scale
+
+        A = (A0 / self.complex_dtype(self.A_scale * 1.0 + 0.0j)).astype(self.complex_dtype)
 
         z = 0.0
         h = min(max_step, L/1000.0) 

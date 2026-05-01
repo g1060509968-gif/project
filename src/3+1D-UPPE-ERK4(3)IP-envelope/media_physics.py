@@ -193,7 +193,7 @@ class OpticalMedium:
         Kerr_term = (gamma_kerr * I_eff * A_t).astype(self.complex_dtype)
         if self.n4 != 0.0:
             gamma_hoke = 1j * (self.omega0 / self.c) * self.n4
-            Kerr_term = Kerr_term + (gamma_hoke * (I_eff ** 2) * A_t).astype(self.complex_dtype)
+            Kerr_term = Kerr_term + (gamma_hoke * I_eff * I_eff * A_t).astype(self.complex_dtype)
 
         # 5. 等离子体项 (内部 float64 保护，输出转回 solver 精度)
         # gen_rate_out 和 rho_t 均为 float64，避免中间乘积溢出
